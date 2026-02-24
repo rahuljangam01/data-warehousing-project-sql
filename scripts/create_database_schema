@@ -1,0 +1,34 @@
+/*
+===================================================================
+Create Database and Schemas
+===================================================================
+Script purpose: 
+
+This script creates a new database after doping the existing if already exists. along with that three schemas within the database : 'bronze', 'silver','gold'
+
+Warning: 
+After running this script will drop the entire 'datawarehouse' database if exist.
+All data in the database will be permanently deleted. proceed with cause and proper backup
+
+===================================================================
+/*
+
+
+
+-- Drop Database 'DataWarehouse'
+  
+DROP database IF exists DataWarehouse;
+
+-- Create Database 'DataWarehouse'
+  
+CREATE DATABASE DataWarehouse;
+
+Use DataWarehouse;
+
+-- Create Schemas
+
+CREATE SCHEMA Bronze;
+
+CREATE SCHEMA Silver;
+
+CREATE SCHEMA Gold; 
