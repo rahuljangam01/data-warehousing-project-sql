@@ -11,24 +11,29 @@ After running this script will drop the entire 'datawarehouse' database if exist
 All data in the database will be permanently deleted. proceed with cause and proper backup
 
 ===================================================================
-/*
 
+Use master;
+GO
 
+-- First we switch database then drop it and recreate the 'Datawarehouse'
 
--- Drop Database 'DataWarehouse'
-  
-DROP database IF exists DataWarehouse;
+Alter database DataWarehouse
+SET single_user
+WITH ROLLBACK IMMEDIATE;
 
--- Create Database 'DataWarehouse'
-  
+GO
+DROP Database DataWarehouse;
+GO
 CREATE DATABASE DataWarehouse;
-
+GO
 Use DataWarehouse;
+GO
 
 -- Create Schemas
 
 CREATE SCHEMA Bronze;
-
+Go
 CREATE SCHEMA Silver;
-
+Go
 CREATE SCHEMA Gold; 
+GO
