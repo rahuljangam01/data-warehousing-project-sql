@@ -7,6 +7,9 @@ This SP help us to extarct the data files into the bronze layer tables
  1. first Truncate the whole tables
  2. then insert the data into the tables 
 
+Usage 
+
+EXEC bronze.load_silver
 =================================================================================
 */
 
