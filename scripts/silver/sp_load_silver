@@ -1,0 +1,204 @@
+
+/*
+=================================================================================
+Store Procedure : For Bulk Insert Data - Bronze > Silver After Transerformation
+--------------------------------------------------------------------------------
+Purpose
+
+This SP help us to extarct the data files into the bronze layer tables
+ 1. first Truncate the whole tables
+ 2. Transform the table/ clean the data
+ 2. then insert the data into the tables 
+ -------------------------------------------------------------------------------
+Usage 
+
+EXEC silver.load_silver
+=================================================================================
+*/
+
+
+create or alter procedure silver.load_silver as 
+
+Begin
+
+	DECLARE @starttime Datetime, @endtime Datetime, @batchstarttime datetime, @batchendtime datetime
+
+PRINT '==========================Loadaing Silver Layer Data=================================' 
+	SET @batchstarttime = GETDATE();
+
+PRINT ' >> ======= Truncate the table : 1 and then insert the data into the Silver.crm_cust_info ======= ' 
+	SET @starttime = GETDATE();
+
+	Truncate Table Silver.crm_cust_info ;
+	Insert into Silver.crm_cust_info (cust_id,cst_key,cst_firstname,cst_lastname,cst_marital_status,cst_gndr,cst_create_date)
+	select 
+		   cust_id,
+		   cst_key,
+		   Trim(cst_firstname) As cst_firstname,
+		   Trim(cst_lastname) As cst_lastname, -- Data Consistancy (Remove Unwanted Space)
+	 Case when UPPER(Trim(cst_marital_status)) = 'M' then 'Married'
+				when UPPER(trim(cst_marital_status)) = 'S' then 'Single'
+				else 'n/a' -- Data Normalize & Stadardization (Make data into readable Formate)
+	 End cst_marital_status,
+		   
+    Case when UPPER(Trim(cst_gndr)) = 'F' then 'Female'
+				when UPPER(trim(cst_gndr)) = 'M' then 'Male'
+				else 'n/a'
+		End cst_gndr,
+			 cst_create_date
+	from (
+
+	select *,
+	ROW_NUMBER () over (partition by cust_id order by cst_create_date desc) as flag_last
+	from Bronze.crm_cust_info
+	where cust_id is not null)t 
+	where flag_last = 1 -- Remove Duplicate (take only recent data)
+
+PRINT ' >> Load Duration : '  + Cast (DATEDIFF(second,@starttime,@endtime) AS VARCHAR)
+
+PRINT ' >> ======= Truncate the table : 2 and then insert the data into the Silver.crm_prd_info ======= ' 
+
+	Truncate Table Silver.crm_prd_info ;
+
+	Insert into Silver.crm_prd_info (prd_id,prd_key,cat_id,prd_nm,prd_cost,prd_line,prd_start_dt,prd_end_dt)
+
+	SELECT prd_id
+		  ,Replace(SUBSTRING (prd_key,1,5),'-','_') as cat_id -- Extract Category ID
+		  ,SUBSTRING (prd_key,7,len(prd_key)) as prd_key -- Extract Product Key
+		  ,prd_nm
+		  ,Isnull(prd_cost,0) as prd_cost
+		  ,Case  Upper(trim(prd_line))
+				 When 'M' then 'Mountain'
+				 When 'R' then 'Road'
+				 When 'S' then 'Other sales'
+				 When 'T' then 'Touring'
+			Else 'n/a'
+	END as prd_line  -- Map the product line code to descriptive values
+			, prd_start_dt
+			, prd_end_dt
+
+	FROM Bronze.crm_prd_info;
+
+	  SET @starttime = GETDATE();
+
+PRINT ' >> Load Duration : '  + Cast (DATEDIFF(second,@starttime,@endtime) AS VARCHAR)
+
+PRINT '======= Truncate the table : 3 and then insert the data into the Silver.crm_sales_details ======='
+
+	  Truncate Table Silver.crm_sales_details
+
+	  Insert into Silver.crm_sales_details (
+		sls_ord_num ,
+		sls_prd_key,
+		sls_cust_id,
+		sls_order_dt,
+		sls_ship_dt,
+		sls_due_dt,
+		sls_sales,
+		sls_quantity,
+		sls_price)
+
+	SELECT
+	sls_ord_num,
+	sls_prd_key,
+	sls_cust_id,
+	CASE WHEN [sls_order_dt] = 0 or len([sls_order_dt]) !=8 then Null -- Handle invalide data
+		Else cast (cast ([sls_order_dt] as nvarchar) as date)  -- change the column type
+	END as [sls_order_dt],
+
+	CASE WHEN [sls_ship_dt] = 0 or len([sls_ship_dt]) !=8 then Null
+		 ELSE cast (cast ([sls_ship_dt] as nvarchar) as date)
+	END as [sls_ship_dt], -- recalculate the sales if original value
+
+	CASE WHEN [sls_ship_dt] = 0 or len([sls_ship_dt]) !=8 then Null
+		 Else cast (cast ([sls_ship_dt] as nvarchar) as date)
+	END as [sls_ship_dt],
+
+	CASE WHEN sls_sales is null or sls_sales <=0 or sls_sales != sls_quantity * abs(sls_price)
+		 THEN sls_quantity * abs(sls_price)
+		 ELSE sls_sales
+	END as sls_sales,
+	[sls_quantity],
+
+	CASE WHEN sls_price is null or sls_price <=0 
+		THEN sls_sales / nullif(sls_quantity,0) 
+		ELSE sls_price
+	END as sls_price
+	FROM [DataWarehouse].[Bronze].[crm_sales_details];
+
+	SET @endtime = GETDATE();
+
+PRINT ' >> Load Duration : '  + Cast (DATEDIFF(second,@starttime,@endtime) AS VARCHAR)
+
+PRINT '======= Truncate the table : 4 and then insert the data into the Silver.erp_cust_az12 ======='
+
+	 SET @starttime = GETDATE();
+
+	 Truncate Table Silver.erp_cust_az12;
+
+	 insert into Silver.erp_cust_az12 (cid, bdate,gen)
+
+	select  
+	CASE WHEN cid like '%NAS%' then SUBSTRING(cid,4,len(cid))
+		ELSE cid
+	END as cid, -- Remove Unwanted Character 
+
+	CASE WHEN bdate  > getdate () then null
+		ELSE bdate
+	END as bdate, -- Make Null when bdate is in future
+
+	CASE WHEN Upper(trim(gen)) in ('F', 'FEMALE') Then 'Female'
+		 WHEN Upper(trim(gen)) in ('M', 'MALE') Then 'Male'
+		 ELSE 'n/a'
+	END as gen -- data standardization & consistency
+
+	from Bronze.erp_cust_az12;
+
+		SET @endtime = GETDATE();
+
+PRINT ' >> Load Duration : '  + Cast (DATEDIFF(second,@starttime,@endtime) AS VARCHAR) 
+PRINT '-- Truncate the table : 5 and then insert the data into the Silver.erp_loc_a101 ======='
+
+	 SET @starttime = GETDATE();
+
+	Truncate table Silver.erp_loc_a101
+
+	 INSERT INTO Silver.erp_loc_a101 (cid,cntry)
+
+	SELECT
+	REPLACE ([cid],'-','') cid   -- Replace
+		  ,CASE when TRim(cntry) in ('US','USA') then  'United States'
+		   when TRim(cntry) = 'DE' then  'Germany'
+		   when trim (cntry) = '' or cntry is null then 'n/a'
+		   else trim (cntry) -- Data Standardization & Consistancy
+	  END AS cntry
+	  FROM [DataWarehouse].Bronze.[erp_loc_a101];
+
+	  SET @endtime = GETDATE();
+
+PRINT ' >> Load Duration : '  + Cast (DATEDIFF(second,@starttime,@endtime) AS VARCHAR)
+PRINT '-- Truncate the table: 6 and then insert the data into the Silver.erp_loc_a101 ======='
+
+
+	 SET @starttime = GETDATE();
+	 Truncate Table Silver.[erp_px_cat_g1v2];
+
+	 Insert into Silver.[erp_px_cat_g1v2] ([id]
+		  ,[cat]
+		  ,[subcat]
+		  ,[maintenance])
+
+
+	SELECT [id]
+		  ,[cat]
+		  ,[subcat]
+		  ,[maintenance]
+	  FROM [DataWarehouse].[Bronze].[erp_px_cat_g1v2]
+
+	  SET @endtime = GETDATE(); 
+
+	  Print ' >> Load Duration : '  + Cast (DATEDIFF(second,@starttime,@endtime) AS VARCHAR) 
+	  Print ' >> Batch Load Duration : '  + Cast (DATEDIFF(second,@batchstarttime,@batchendtime) AS VARCHAR) 
+
+	  SET @batchENDtime = GETDATE();
+END
