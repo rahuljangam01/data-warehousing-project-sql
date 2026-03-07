@@ -1,0 +1,40 @@
+/*
+=================================================================================
+View : By joining the tables cretae an view (Dimension table)
+--------------------------------------------------------------------------------
+Purpose
+
+ -------------------------------------------------------------------------------
+Usage 
+
+EXEC silver.load_silver
+=================================================================================
+*/
+
+
+
+
+Drop view gold.dim_customers;
+CREATE VIEW gold.dim_customers AS
+SELECT 
+		Row_Number () over (order by cust_id) as customer_key,
+		ci.cust_id as customer_id, 
+		ci.cst_key as customer_number, 
+		ci.cst_firstname as customer_name, 
+		ci.cst_lastname as customer_lastname,
+		CASE WHEN ci.cst_gndr != 'n/a' THEN ci.cst_gndr      -- CRM Data is master data
+			 ELSE coalesce (ca.gen,'n/a')					 -- CAOLESCE - If data is not present in the master table then take it from ERP Data
+		END AS gender,
+		ca.bdate as birth_date,
+		cl.cntry as country,
+		ci.cst_marital_status as marital_status,
+		ci.cst_create_date as create_date
+	FROM silver.crm_cust_info as ci
+	LEFT JOIN silver.erp_cust_az12 as ca
+	ON		ci.cst_key = ca.cid
+	LEFT JOIN Silver.erp_loc_a101 as cl
+	ON		ci.cst_key = cl.cid;
+	
+	--)t
+	--group by customer_id 
+	--having count(*) > 1;
